@@ -119,6 +119,8 @@ def main():
     marketcap = get_MarketCap()
     sp500_df = pd.merge(marketcap, sp500_com, on='Symbol', how='inner')
     st.title("Stock App (S&P500)")
+    st.markdown(""" Stock App is a comprehensive tool for monitoring the S&P 500. Powered by yfinance for data retrieval, Plotly for visualization, and web scraping for insights, it offers stock data, interactive charts, and a useful trending analysis plot to identify market patterns and trends.""")
+
     col1,col2,col3,col4,col5 = st.columns(5)
     with col2:
         stock_selected = st.selectbox('**Stock**', list_500)
@@ -167,7 +169,10 @@ def main():
         st.write(fig)
     with right_column:
         st.plotly_chart(plot_by_industry(sp500_df))
-  
+
+    st.markdown("##")
+    st.markdown("##")
+    st.write("© Copyright 2024 Felipe Zenteno  All rights reserved.")
 if __name__ == '__main__':
     main()
     
