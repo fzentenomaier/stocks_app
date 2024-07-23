@@ -1,8 +1,8 @@
+streamlit==1.34.0
 yfinance
 pandas
 statsmodels
 plotly
-streamlit
 scikit-learn
 requests
 beautifulsoup4
