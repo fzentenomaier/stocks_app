@@ -1,22 +1,17 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Oct 16 17:13:11 2023
-
-@author: felipezenteno
-"""
-
-import pandas as pd
 import yfinance as yf
+import pandas as pd
 import datetime
+from statsmodels.tsa.seasonal import seasonal_decompose
+import plotly.graph_objects as go
 import streamlit as st
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+
 import plotly.express as px
 import requests
 from bs4 import BeautifulSoup
-import plotly.graph_objects as go
-from statsmodels.tsa.seasonal import seasonal_decompose
 
-
+@st.cache_data
 def download_data(stock, start, end):
     data = yf.download(stock, start, end)
     return data
@@ -33,6 +28,12 @@ def get_sp500():
     list_names = sp500_components['Security'].tolist() + sp500_components['Symbol'].tolist()
     sp500_components.rename(columns={"GICS Sector": "Industries"}, inplace=True)
     return sp500_components, sp500_dict, sp500_dict2, list_names
+
+def convert_market_cap(market_cap_str):
+    if 'B' in market_cap_str:
+        return int(float(market_cap_str.replace(',', '').replace('B', '')) * 1e9)
+    else:
+        return (float(market_cap_str)) 
 
 def convert_market_cap(market_cap_str):
     if 'B' in market_cap_str:
@@ -68,6 +69,7 @@ def plot_by_industry(df):
     fig.update_layout(showlegend=False)
     return fig
 
+
 def get_PriceCapVol(ticker_symbol,Period):
     ticker = yf.Ticker(ticker_symbol)
     data = ticker.history(period=f'{Period}y')
@@ -93,8 +95,7 @@ def format_number(number):
     else:
         return str(number)
 
-def get_plot(stock_ticker, start, end, days):
-    df = download_data(stock_ticker, start, end)
+def get_plot(df):
     df['Mid'] = (df['High']+df['Low'])/2 #The use of mid or close is arbitrary.
     decomposition = seasonal_decompose(df['Mid'], period=365)
     df['Trend'] = decomposition.trend
@@ -109,8 +110,119 @@ def get_plot(stock_ticker, start, end, days):
     #Check Volume
     #df2 = df[['Close','Volume']].plot(subplots=True)
     df = df[['Mid','Trend','Seasonal','Residual',"MA30","MA100","EWM10"]]
+    df = df.dropna()
     return df
 
+def get_data(data):
+# Calculate moving averages and other indicators
+    data['MA_10'] = data['Close'].rolling(window=10).mean()
+    data['MA_50'] = data['Close'].rolling(window=50).mean()
+    data['MA_100'] = data['Close'].rolling(window=100).mean()
+    decomposition = seasonal_decompose(data['Close'], period=365)
+    data['Seasonal'] = decomposition.seasonal
+    days = 10
+    data['EWM10'] = data['Close'].ewm(span=days).mean()
+    data = data[["Close", 'Seasonal', "MA_10", "MA_50", "MA_100", "EWM10"]]
+    data = data.dropna()
+    data.index = pd.to_datetime(data.index)
+    return data
+
+
+# Train-test split
+def train_model(data, columns): #
+# Prepare data for training and testing
+    X = data[columns]
+    y = data['Close'].shift(-1).dropna()
+    X = X[:-1]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=8)
+    # Train a model
+    model = LinearRegression()
+    model.fit(X_train, y_train)
+# Extract model parameters
+    coefficients = model.coef_
+    intercept = model.intercept_
+    return coefficients, intercept
+
+def simulate_model(intercept, coefficients, X, initial_balance, threshold_percentage):
+    # Initialize balance and position
+    # Initialize balance and position
+    X = X[['Close', 'Seasonal', 'MA_10', 'MA_50', 'MA_100', 'EWM10']]
+    balance = initial_balance
+    position = 0  # Number of shares
+    trades = []
+    
+    # Iterate over each data point in the entire dataset
+    for i in range(len(X)):
+        current_date = X.index[i]
+        current_price = round(X.iloc[i]['Close'], 2)
+        
+        # Calculate predicted price using model parameters
+        predicted_price = intercept + sum(coefficients * X.iloc[i])
+        predicted_price = round(predicted_price, 2)
+    
+        # Calculate threshold values
+        upper_threshold = current_price * (1 + threshold_percentage)
+        lower_threshold = current_price * (1 - threshold_percentage)
+    
+        # Buy decision
+        if predicted_price > upper_threshold and balance >= current_price:
+            shares_to_buy = int(balance // current_price)  # Buy whole shares only
+            if shares_to_buy > 0:
+                position += shares_to_buy
+                balance -= shares_to_buy * current_price
+                trades.append([current_date, 'Buy', shares_to_buy, current_price, predicted_price, int(balance + position * current_price)])
+    
+        # Sell decision
+        elif predicted_price < lower_threshold and position > 0:
+            balance += position * current_price
+            trades.append([current_date, 'Sell', position, current_price, predicted_price, int(balance)])
+            position = 0
+    
+    # Convert trades list to DataFrame
+    trades_df = pd.DataFrame(trades, columns=['Date', 'Action', 'Stocks', 'Price', 'Predict_Price', 'Balance'])
+    
+    # Calculate buy-and-hold final balance
+    buy_and_hold_shares = initial_balance // X.iloc[0]['Close']
+    buy_and_hold_final_balance = buy_and_hold_shares * X.iloc[-1]['Close']
+    
+    # Determine if the trading strategy was "Good" or "Bad"
+    final_balance = balance + (position * X.iloc[-1]['Close'])
+    profit = final_balance - initial_balance
+    today_price = round(X.iloc[-1]['Close'],2)
+    first_price = round(X.iloc[0]['Close'],2)
+    prices_list = [today_price, first_price]
+    
+    return trades_df, initial_balance, final_balance, profit, balance, trades, buy_and_hold_final_balance, predicted_price, prices_list
+
+
+def plot_operations(data, trades):
+# Add stock price line plot
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=data.index, y=data['Close'], mode='lines', name='Close Price'))
+    
+    # Add scatter plot for trades
+    for trade in trades:
+        if trade[1] == 'Buy':
+            fig.add_trace(go.Scatter(x=[trade[0]], y=[trade[3]], mode='markers', marker=dict(symbol='triangle-up', color='green'), name='Buy'))
+        elif trade[1] == 'Sell':
+            fig.add_trace(go.Scatter(x=[trade[0]], y=[trade[3]], mode='markers', marker=dict(symbol='triangle-down', color='red'), name='Sell'))
+    
+    if len(trades) > 1:
+         #Update legend to show only first three items
+        fig.update_traces(showlegend=False)  # Hide all legends initially
+        fig.data[0].showlegend = True  # Show legend for the first trace (Close Price)
+        fig.data[1].showlegend = True  # Show legend for the second trace (Buy)
+        fig.data[2].showlegend = True  # Show legend for the third trace (Sell)
+    
+    # Update layout
+    fig.update_layout(
+        title='Stock Price and Trade Actions',
+        xaxis_title='Date',
+        yaxis_title='Price',
+        showlegend=True,
+    )
+    # Show plot
+    return fig
 
 #%% Streamlit
 def main():
@@ -119,14 +231,21 @@ def main():
     marketcap = get_MarketCap()
     sp500_df = pd.merge(marketcap, sp500_com, on='Symbol', how='inner')
     st.title("Stock App (S&P500)")
-    st.markdown(""" Stock App is a comprehensive tool for monitoring the S&P 500. Powered by yfinance for data retrieval, Plotly for visualization, and web scraping for insights, it offers stock data, interactive charts, and a useful trending analysis plot to identify market patterns and trends.""")
-
+    st.markdown("""Stock App is a sophisticated tool for monitoring the S&P 500. Utilizing yfinance for data retrieval and Plotly for visualizations, our app offers comprehensive stock data and interactive charts to identify market trends. \n\n
+                \n\nAdditionally, Stock App features a prediction model using **linear regression** with **sklearn**, allowing you to simulate trading actions and compare them to the buy-and-hold strategy.\n\n
+                \n\nEnhance your investment decisions with cutting-edge insights from Stock App.
+                """)
     col1,col2,col3,col4,col5 = st.columns(5)
     with col2:
-        stock_selected = st.selectbox('**Stock**', list_500)
+        list_500.append('<select>')
+        default_ix = list_500.index('MET')
+        stock_selected = st.selectbox('**Stock**', list_500, index=default_ix)
+    with col3:
+        initial_amount_selected = st.number_input("Initial Amount (USD)", value=1000, placeholder="e.g 1000")
     with col4:
-        time_period = [10, 5, 3]
-        time_period_selected = st.selectbox('**Period** (Years)', time_period)
+        time_period = ['<select>', 5,6,7,8,9,10]
+        default_ix = time_period.index(10)
+        time_period_selected = st.selectbox('**Period** (Years)', time_period, index=default_ix)
     end = datetime.datetime.now()
     start = end - datetime.timedelta(days=time_period_selected*365)
 
@@ -140,10 +259,15 @@ def main():
 #                       METRICS
     current_price, market_cap, volume, old_price  = get_PriceCapVol(stock_ticker, time_period_selected)
     left_column, middle_column, right_column = st.columns(3)
+    data = download_data(stock_ticker, start, end)
+    new_data = get_data(data)
+    coefficients, intercept = train_model(new_data, ['Close', 'Seasonal', 'MA_10', 'MA_50', 'MA_100', 'EWM10'])
+    threshold_percentage_selected = 1/1000 #It can be an input
+    trades_df,initial_balance, final_balance, profit, balance, trades, buy_and_hold_final_balance, predicted_price, prices_list = simulate_model(intercept,coefficients, data, initial_amount_selected, threshold_percentage_selected)
     with left_column:
         st.subheader("")
-        variacion = "{:,.2f}".format(get_variation(current_price, old_price))
-        st.metric("Current Price", "${:,.2f}".format(current_price),f'{variacion}%')
+        variacion = "{:,.2f}".format(get_variation(prices_list[0], prices_list[1]))
+        st.metric("Current Price", "${:,.2f}".format(prices_list[0]),f'{variacion}%')
     with middle_column:
         st.subheader("")
         st.metric("Market Cap", f'$ {format_number(market_cap)}')
@@ -151,8 +275,30 @@ def main():
         st.subheader("")
         st.metric("Volume", f'${format_number(volume)}')
         
+#We will show the 
+    st.header('Operations using the Algorithym Advices')
+    col1,col2,col3, col4, col5 = st.columns([10,1,7,1,7])
+    with col1:
+        st.plotly_chart(plot_operations(data, trades))
+    with col3:
+        trades_df['Date'] = pd.to_datetime(trades_df['Date']) 
+        # Extract only the date part
+        trades_df['Date'] = trades_df['Date'].dt.date
+        st.dataframe(trades_df)
+    with col5:
+        var_final_balance = "{:,.2f}".format(get_variation(final_balance, initial_amount_selected))
+        st.metric("Final Balance", f'$ {format_number(round(final_balance,2))}', f'{var_final_balance}%')
+        st.metric("Profit", f'$ {format_number(round(profit,2))}')
+        var_buy_hold = "{:,.2f}".format(get_variation(buy_and_hold_final_balance, initial_amount_selected))
+        st.metric("Buy and Hold Balance", f'$ {format_number(round(buy_and_hold_final_balance,2))}', f'{var_buy_hold}%')
+        st.metric("Predicted Price Today", f'$ {format_number(round(predicted_price,2))}')
+
+
+
+    
+
     st.header(f'Trend Analysis  ({time_period_selected} Years)')
-    st.line_chart(get_plot(stock_ticker, start, end, 10))
+    st.line_chart(get_plot(data))
     st.title(" Industries Plots in S&P500")
     
     left_column,x, right_column = st.columns([6,1,8])
@@ -175,4 +321,5 @@ def main():
     st.write("© Copyright 2024 Felipe Zenteno  All rights reserved.")
 if __name__ == '__main__':
     main()
-    
+
+
