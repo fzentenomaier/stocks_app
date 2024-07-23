@@ -8,3 +8,6 @@ bs4
 statsmodels
 lxml
 matplotlib
+LinearRegression
+sklearn
+
