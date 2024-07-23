@@ -4,6 +4,9 @@ import datetime
 from statsmodels.tsa.seasonal import seasonal_decompose
 import plotly.graph_objects as go
 import streamlit as st
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 
