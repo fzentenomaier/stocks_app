@@ -278,7 +278,7 @@ def main():
         
 #We will show the 
     st.header('Operations using the Algorithym Advices')
-    col1,col2,col3, col4, col5 = st.columns([10,1,7,1,7])
+    col1,col2,col3, col4, col5 = st.columns([12,2,10,1,5])
     with col1:
         st.plotly_chart(plot_operations(data, trades))
     with col3:
@@ -322,5 +322,3 @@ def main():
     st.write("© Copyright 2024 Felipe Zenteno  All rights reserved.")
 if __name__ == '__main__':
     main()
-
-
