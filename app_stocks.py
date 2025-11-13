@@ -19,17 +19,26 @@ def download_data(stock, start, end):
 
 @st.cache_data
 def get_sp500():
-    sp500_url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-    sp500_table = pd.read_html(sp500_url)
-    sp500_components = sp500_table[0]
-    sp500_dict = dict(zip(sp500_components['Security'].tolist(),
-                          sp500_components['Symbol'].tolist()))
-    sp500_dict2 = dict(zip(sp500_components['Symbol'].tolist(),
-                          sp500_components['Security'].tolist()))
-    list_names = sp500_components['Security'].tolist() + sp500_components['Symbol'].tolist()
-    sp500_components.rename(columns={"GICS Sector": "Industries"}, inplace=True)
-    return sp500_components, sp500_dict, sp500_dict2, list_names
+    sp500_url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 
+    # Add headers so Wikipedia doesn't block the request
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    response = requests.get(sp500_url, headers=headers)
+    response.raise_for_status()  # raises HTTPError if 403 or similar
+
+    # Parse tables from the HTML text
+    sp500_table = pd.read_html(response.text)
+    sp500_components = sp500_table[0]
+
+    # Prepare data and mappings
+    sp500_dict = dict(zip(sp500_components["Security"], sp500_components["Symbol"]))
+    sp500_dict2 = dict(zip(sp500_components["Symbol"], sp500_components["Security"]))
+    list_names = sp500_components["Security"].tolist() + sp500_components["Symbol"].tolist()
+
+    sp500_components.rename(columns={"GICS Sector": "Industries"}, inplace=True)
+
+    return sp500_components, sp500_dict, sp500_dict2, list_names
+    
 def convert_market_cap(market_cap_str):
     if 'B' in market_cap_str:
         return int(float(market_cap_str.replace(',', '').replace('B', '')) * 1e9)
