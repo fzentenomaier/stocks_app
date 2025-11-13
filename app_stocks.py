@@ -18,26 +18,39 @@ def download_data(stock, start, end):
     return data
 
 @st.cache_data
+import pandas as pd
+import requests
+import streamlit as st
+
+@st.cache_data
 def get_sp500():
     sp500_url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-
-    # Add headers so Wikipedia doesn't block the request
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     response = requests.get(sp500_url, headers=headers)
-    response.raise_for_status()  # raises HTTPError if 403 or similar
+    response.raise_for_status()
 
-    # Parse tables from the HTML text
     sp500_table = pd.read_html(response.text)
     sp500_components = sp500_table[0]
 
-    # Prepare data and mappings
-    sp500_dict = dict(zip(sp500_components["Security"], sp500_components["Symbol"]))
-    sp500_dict2 = dict(zip(sp500_components["Symbol"], sp500_components["Security"]))
-    list_names = sp500_components["Security"].tolist() + sp500_components["Symbol"].tolist()
+    # Normalize column names (remove spaces/newlines)
+    sp500_components.columns = [col.strip() for col in sp500_components.columns]
 
-    sp500_components.rename(columns={"GICS Sector": "Industries"}, inplace=True)
+    # Try to detect the right columns automatically
+    symbol_col = next((c for c in sp500_components.columns if "Symbol" in c), None)
+    name_col = next((c for c in sp500_components.columns if c in ["Security", "Company", "Name"]), None)
+    sector_col = next((c for c in sp500_components.columns if "GICS" in c or "Sector" in c), None)
+
+    if not (symbol_col and name_col):
+        raise ValueError(f"Unexpected table format. Columns found: {sp500_components.columns.tolist()}")
+
+    sp500_components.rename(columns={sector_col: "Industries"}, inplace=True)
+
+    sp500_dict = dict(zip(sp500_components[name_col], sp500_components[symbol_col]))
+    sp500_dict2 = dict(zip(sp500_components[symbol_col], sp500_components[name_col]))
+    list_names = sp500_components[name_col].tolist() + sp500_components[symbol_col].tolist()
 
     return sp500_components, sp500_dict, sp500_dict2, list_names
+
     
 def convert_market_cap(market_cap_str):
     if 'B' in market_cap_str:
