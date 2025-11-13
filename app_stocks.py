@@ -18,11 +18,6 @@ def download_data(stock, start, end):
     return data
 
 @st.cache_data
-import pandas as pd
-import requests
-import streamlit as st
-
-@st.cache_data
 def get_sp500():
     sp500_url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
